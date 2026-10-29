@@ -15,7 +15,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preload" href="assets/title.woff" as="font" type="font/woff" crossorigin>
-<link rel="stylesheet" href="assets/site.css">
+<link rel="stylesheet" href="assets/site.css?v=4">
 </head>
 <body>
 
@@ -41,6 +41,9 @@
     <div class="player-frame">
       <video id="player" controls playsinline webkit-playsinline x5-playsinline preload="none"
              poster="assets/posters/ep1.jpg" src="v/ep1/master.m3u8"></video>
+      <button class="big-play" id="big-play" type="button" aria-label="播放" hidden>
+        <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg></span>
+      </button>
       <button class="next-overlay" id="next-overlay" type="button" hidden></button>
     </div>
     <div class="now">
@@ -129,6 +132,6 @@
 </footer>
 
 <script src="assets/hls.light.min.js" defer></script>
-<script src="assets/site.js" defer></script>
+<script src="assets/site.js?v=3" defer></script>
 </body>
 </html>

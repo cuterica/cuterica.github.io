@@ -3,6 +3,7 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var video = $('player');
+  var bigPlay = $('big-play');
   var note = $('note');
   var nextBtn = $('next-overlay');
   var qWrap = $('quality-wrap');
@@ -30,8 +31,7 @@
   var hlsJs = !!(window.Hls && window.Hls.isSupported());
   var mode = nativeHls && (appleWebKit || !hlsJs) ? 'native' : (hlsJs ? 'hlsjs' : 'none');
 
-  var hls = null, cur = -1, pendingSeek = 0;
-  var manifestReady = false, wantLoad = false, startedLoad = false, retries = 0, lastSave = 0;
+  var hls = null, cur = -1, pendingSeek = 0, started = false, manifestReady = false, retries = 0, lastSave = 0;
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) {
@@ -82,13 +82,7 @@
     if (v !== -1) qSel.options[0].textContent = '自动';
   });
 
-  // ---------- 加载 ----------
-  function beginLoad() {
-    startedLoad = true;
-    hls.startLoad(pendingSeek || -1);
-    pendingSeek = 0;
-  }
-
+  // ---------- 播放 ----------
   function onHlsError(evt, data) {
     if (!data.fatal) return;
     var ep = eps[cur];
@@ -106,12 +100,49 @@
     }
   }
 
+  // 卸下当前视频,回到"封面 + 大播放键"
+  function teardown() {
+    if (hls) { hls.destroy(); hls = null; }
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    video.controls = false;
+    bigPlay.hidden = mode === 'none';
+    qWrap.hidden = true;
+    started = manifestReady = false;
+    retries = 0;
+  }
+
+  // 用户点了播放才开始加载
+  function start() {
+    var ep = eps[cur];
+    if (!ep || started || mode === 'none') return;
+    started = true;
+    bigPlay.hidden = true;
+    video.controls = true;
+    if (mode === 'hlsjs') {
+      // 最多预读 60 秒,免得只看几秒也把整集下完
+      hls = new Hls({
+        startPosition: pendingSeek || -1, capLevelToPlayerSize: true, abrEwmaDefaultEstimate: 1500000,
+        maxBufferLength: 30, maxMaxBufferLength: 60
+      });
+      pendingSeek = 0;
+      hls.on(Hls.Events.MANIFEST_PARSED, function () { manifestReady = true; buildQuality(); });
+      hls.on(Hls.Events.LEVEL_SWITCHED, autoLabel);
+      hls.on(Hls.Events.ERROR, onHlsError);
+      hls.loadSource(ep.src);
+      hls.attachMedia(video);
+    } else {
+      video.src = ep.src; // 续播位置在 loadedmetadata 里跳
+    }
+    var p = video.play();
+    if (p && p.catch) p.catch(function () {});
+  }
+
   function load(i, play) {
     var ep = eps[i];
     if (!ep) return;
     cur = i;
-    manifestReady = wantLoad = startedLoad = false;
-    retries = 0;
 
     document.documentElement.style.setProperty('--accent', ep.accent);
     $('now-title').textContent = ep.no + ' · ' + ep.title;
@@ -128,48 +159,28 @@
     $('prev').disabled = i === 0;
     $('next').disabled = i === eps.length - 1;
     nextBtn.hidden = true;
+    bigPlay.setAttribute('aria-label', '播放' + ep.no + ' · ' + ep.title);
     document.title = ep.no + ' · ' + ep.title + ' — 期货法律法规 · 教学动画';
     clearNote();
 
-    if (hls) { hls.destroy(); hls = null; }
-    qWrap.hidden = true;
+    teardown();
     video.poster = ep.poster;
+    setMediaSession(ep);
 
-    var saved = parseFloat(lsGet('t:' + ep.id) || '0');
-    pendingSeek = saved > 10 ? saved : 0;
-
-    if (mode === 'hlsjs') {
-      video.removeAttribute('src');
-      hls = new Hls({ autoStartLoad: false, capLevelToPlayerSize: true, abrEwmaDefaultEstimate: 1500000 });
-      hls.on(Hls.Events.MANIFEST_PARSED, function () {
-        manifestReady = true;
-        buildQuality();
-        if (wantLoad && !startedLoad) beginLoad();
-      });
-      hls.on(Hls.Events.LEVEL_SWITCHED, autoLabel);
-      hls.on(Hls.Events.ERROR, onHlsError);
-      hls.loadSource(ep.src);
-      hls.attachMedia(video);
-    } else if (mode === 'native') {
-      video.src = ep.src;
-      video.load();
-    } else {
+    if (mode === 'none') {
       setNote('这个浏览器播放不了视频，请换用最新版的 Chrome、Edge、Safari，或在微信里打开。');
       return;
     }
-
+    var saved = parseFloat(lsGet('t:' + ep.id) || '0');
+    pendingSeek = saved > 10 ? saved : 0;
     if (pendingSeek) {
       setNote('上次看到 ' + fmt(pendingSeek) + '，点播放会从这里继续。', '从头看', function () {
         lsSet('t:' + ep.id, null);
         clearNote();
-        if (startedLoad) video.currentTime = 0; else pendingSeek = 0;
+        if (started) video.currentTime = 0; else pendingSeek = 0;
       });
     }
-    setMediaSession(ep);
-    if (play) {
-      var p = video.play();
-      if (p && p.catch) p.catch(function () {});
-    }
+    if (play) start();
   }
 
   function setMediaSession(ep) {
@@ -184,11 +195,9 @@
   }
 
   // ---------- 播放器事件 ----------
+  bigPlay.addEventListener('click', start);
   video.addEventListener('play', function () {
     nextBtn.hidden = true;
-    if (mode === 'hlsjs' && hls && !startedLoad) {
-      if (manifestReady) beginLoad(); else wantLoad = true;
-    }
     if (!note.hidden && !retries) clearNote();
   });
   video.addEventListener('loadedmetadata', function () {
@@ -197,11 +206,10 @@
       pendingSeek = 0;
     }
   });
-  video.addEventListener('playing', function () { startedLoad = true; });
   video.addEventListener('timeupdate', function () {
     var ep = eps[cur];
     var d = video.duration;
-    if (!ep || !d || !isFinite(d)) return;
+    if (!ep || !started || !d || !isFinite(d)) return;
     var now = Date.now();
     if (now - lastSave < 4000) return;
     lastSave = now;
@@ -219,7 +227,7 @@
     }
   });
   video.addEventListener('error', function () {
-    if (mode === 'native' && video.getAttribute('src')) setNote('视频加载失败，请检查网络后刷新页面再试。');
+    if (mode === 'native' && started) setNote('视频加载失败，请检查网络后刷新页面再试。');
   });
 
   // ---------- 选集 ----------
@@ -260,7 +268,7 @@
     if (i >= 0 && i !== cur) select(i, false, true);
   });
 
-  var start = fromHash();
-  load(start >= 0 ? start : 0, false);
-  if (start >= 0) $('watch').scrollIntoView(true);
+  var first = fromHash();
+  load(first >= 0 ? first : 0, false);
+  if (first >= 0) $('watch').scrollIntoView(true);
 })();
