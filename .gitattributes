@@ -1,0 +1,4 @@
+*.ts binary
+*.jpg binary
+*.woff binary
+*.m3u8 text eol=lf
